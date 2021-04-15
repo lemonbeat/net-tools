@@ -16,7 +16,8 @@
 
 usage() {
     cat <<EOF
-$0 [--config|-c <file>] [--iface|-i <interface>] [start|up] [stop|down]
+$0 [--config|-c <file>] [--iface|-i <interface>] [--bridge|-b <bridge>]
+               [start|up] [stop|down]
                [any optional parameters for ip command]
 
 If no parameters are given, then "zeth" network interface and "zeth.conf"
@@ -28,6 +29,7 @@ Examples:
 $ net-setup.sh
 $ net-setup.sh --config zeth-vlan.conf
 $ net-setup.sh --config my-own-config.conf --iface foobar
+$ net-setup.sh --config my-own-config.conf --iface foobar --bridge zbr
 
 It is also possible to let the script return and then stop the network
 interface later. Is can be done by first creating the interface with
@@ -62,6 +64,7 @@ if [ `id -u` != 0 ]; then
 fi
 
 IFACE=zeth
+BRIDGE=
 
 # Default config file setups default connectivity IP addresses
 CONF_FILE=./zeth.conf
@@ -75,6 +78,10 @@ do
 	    ;;
 	--iface|-i)
 	    IFACE="$2"
+	    shift 2
+	    ;;
+	--bridge|-b)
+	    BRIDGE="$2"
 	    shift 2
 	    ;;
 	--help|-h)
@@ -113,12 +120,22 @@ ctrl_c() {
 }
 
 if [ "$ACTION" != stop ]; then
-    echo "Creating $IFACE"
+    echo "Creating interface $IFACE"
     ip tuntap add $IFACE mode tap $@
+
+    if [ "$BRIDGE" != "" ]; then
+	if [ ! -d /sys/class/net/$BRIDGE ]; then
+	    echo "Creating bridge $BRIDGE"
+	    ip link add name $BRIDGE type bridge
+	fi
+
+	echo "Adding $IFACE to $BRIDGE"
+	ip link set $IFACE master $BRIDGE
+    fi
 
     # The idea is that the configuration file will setup
     # the IP addresses etc. for the created interface.
-    . "$CONF_FILE" $IFACE
+    . "$CONF_FILE" $IFACE $BRIDGE
 fi
 
 if [ "$ACTION" = "" ]; then
@@ -132,6 +149,11 @@ if [ "$ACTION" != start ]; then
 
     if [ -f "$CONF_FILE".stop ]; then
 	. "$CONF_FILE".stop $IFACE
+    fi
+
+    if [ "$BRIDGE" != "" ]; then
+	echo "Removing $IFACE from $BRIDGE"
+	ip link set $IFACE nomaster
     fi
 
     echo "Removing $IFACE"
